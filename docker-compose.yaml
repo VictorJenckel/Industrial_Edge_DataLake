@@ -1,0 +1,206 @@
+version: '3.8'
+
+# =============================================================================
+#  SHARED CONFIGURATION — YAML anchor
+#
+#  All Airflow services (scheduler, webserver, triggerer) inherit this block.
+#  Sensitive values are never hardcoded here — they are injected from .env
+#  at runtime. See .env.example for required variables.
+# =============================================================================
+x-airflow-common: &airflow-common
+  build: .
+  image: airflow_rust_dc2:latest
+  environment:
+    # --- OS and Python timezone ---
+    TZ: America/Sao_Paulo
+
+    # --- Airflow metadata database (the postgres_dc2 container below) ---
+    # This is NOT the production inspection database.
+    # Production data lives in PostgreSQL running directly on the host (port 5432).
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: >-
+      postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@postgres_dc2:5432/${AIRFLOW_DB_NAME}
+
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+
+    # Fernet key for encrypting sensitive values stored in the metadata DB.
+    # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?Set AIRFLOW_FERNET_KEY in .env}
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:?Set AIRFLOW_SECRET_KEY in .env}
+
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: America/Sao_Paulo
+    AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+
+    # --- Production database (PostgreSQL running on the host, not in Docker) ---
+    # Inside containers, 127.0.0.1 resolves to the container itself.
+    # host.docker.internal resolves to the actual host IP via extra_hosts below.
+    # DAGs should use these variables instead of hardcoding any address.
+    PG_HOST: host.docker.internal
+    PG_PORT: "5432"
+    PG_DBNAME: ${PG_DBNAME}
+    PG_USER: ${PG_USER}
+    PG_PASSWORD: ${PG_PASSWORD}
+
+    # --- Machine connectivity (FSP line) ---
+    FSP_MACHINE_IP: ${FSP_MACHINE_IP}
+    FSP_MACHINE_USER: ${FSP_MACHINE_USER}
+    FSP_MACHINE_PASS: ${FSP_MACHINE_PASS}
+    FSP_REMOTE_DATA_DIR: ${FSP_REMOTE_DATA_DIR}
+    FSP_STAGING_DIR: /home/dc2/temp/fsp
+
+    # --- Machine connectivity (Eagle Vision — SL2 / LRA1 lines) ---
+    EAGLE_SMB_HOST: ${EAGLE_SMB_HOST}
+    EAGLE_SMB_USER: ${EAGLE_SMB_USER}
+    EAGLE_SMB_PASS: ${EAGLE_SMB_PASS}
+
+  # extra_hosts injects "host.docker.internal → host IP" into the container's /etc/hosts.
+  # "host-gateway" is a Docker Engine reserved keyword (Linux) that resolves to
+  # the docker0 interface IP (typically 172.17.0.1) — the physical host.
+  # Without this, host.docker.internal does not exist on Linux.
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+
+  volumes:
+    # --- Airflow core directories ---
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+
+    # --- Staging area for machine file downloads (SMB and SSH/rsync) ---
+    # ETL and audit DAGs write temporary files here before processing.
+    # Host mount ensures files survive container restarts.
+    - /home/dc2/temp:/home/dc2/temp
+
+    # --- Parquet output for quarterly cold archival ---
+    # backup_etl writes compressed Parquet files here.
+    # These are the cold storage layer of the inspection data lake,
+    # and will feed the Digital Twin historical simulation model.
+    - /media/dc2/data/parquet_dc2:/media/dc2/data/parquet_dc2
+
+  depends_on:
+    postgres_dc2:
+      condition: service_healthy
+
+# =============================================================================
+#  SERVICES
+# =============================================================================
+services:
+
+  # ---------------------------------------------------------------------------
+  # 1. PostgreSQL — Airflow metadata database
+  #
+  #    Stores DAG state, task instances, XCom values, Airflow Variables,
+  #    and connections. This is NOT where inspection data is stored.
+  #    Production inspection data lives in PostgreSQL on the host (port 5432).
+  # ---------------------------------------------------------------------------
+  postgres_dc2:
+    image: postgres:15
+    environment:
+      POSTGRES_USER:     ${AIRFLOW_DB_USER}
+      POSTGRES_PASSWORD: ${AIRFLOW_DB_PASSWORD}
+      POSTGRES_DB:       ${AIRFLOW_DB_NAME}
+    ports:
+      # 5433 on the host → 5432 inside the container.
+      # Port 5432 on the host is reserved for the production inspection database,
+      # which runs directly on the host (outside Docker).
+      - "5433:5432"
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${AIRFLOW_DB_USER}", "-d", "${AIRFLOW_DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # 2. Init — runs ONCE on first deploy
+  #
+  #    Migrates the Airflow metadata schema and creates the admin user.
+  #    Uses `restart: on-failure` so it retries if postgres_dc2 isn't
+  #    ready yet, but does not loop after successful completion.
+  # ---------------------------------------------------------------------------
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow_init_dc2
+    command: >
+      bash -c "
+        airflow db migrate &&
+        airflow users create
+          --username admin
+          --firstname Admin
+          --lastname User
+          --role Admin
+          --email ${AIRFLOW_ADMIN_EMAIL:?Set AIRFLOW_ADMIN_EMAIL in .env}
+          --password ${AIRFLOW_ADMIN_PASSWORD:?Set AIRFLOW_ADMIN_PASSWORD in .env}
+      "
+    restart: on-failure
+
+  # ---------------------------------------------------------------------------
+  # 3. Scheduler — Airflow core
+  #
+  #    Parses DAGs, evaluates schedules, submits task instances for execution.
+  #    With LocalExecutor, also runs the tasks directly in this process.
+  # ---------------------------------------------------------------------------
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow_scheduler_dc2
+    command: airflow scheduler
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname $$(hostname)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      postgres_dc2:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ---------------------------------------------------------------------------
+  # 4. Webserver — Airflow UI
+  #
+  #    Exposed on host port 8081.
+  #    Access from the industrial network via http://<server-ip>:8081
+  # ---------------------------------------------------------------------------
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: airflow_webserver_dc2
+    command: airflow webserver
+    ports:
+      - "8081:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      postgres_dc2:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ---------------------------------------------------------------------------
+  # 5. Triggerer — deferred sensor support
+  #
+  #    Lightweight async process that handles deferrable operators.
+  #    Required for future sensor-based DAGs (e.g. waiting for a machine
+  #    to come online before triggering ingestion).
+  # ---------------------------------------------------------------------------
+  airflow-triggerer:
+    <<: *airflow-common
+    container_name: airflow_triggerer_dc2
+    command: airflow triggerer
+    restart: unless-stopped
+    depends_on:
+      postgres_dc2:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
