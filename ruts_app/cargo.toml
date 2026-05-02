@@ -1,0 +1,88 @@
+[package]
+name    = "etl_workers"
+version = "0.1.0"
+edition = "2021"
+
+# =============================================================================
+#  ETL Worker Binaries
+#
+#  Each file under src/bin/ compiles to an independent binary with the same name.
+#  A single `cargo build --release` compiles all four workers at once.
+#
+#  The binaries are the processing layer of the glass inspection data pipeline.
+#  They receive files and connection parameters from the Airflow orchestration
+#  layer (Python/DAGs) and return JSON to stdout for status reporting.
+#
+#  Binary responsibilities:
+#   mirror2_etl   — Reads ISRA machine data from MySQL, loads into PostgreSQL
+#   cut2_etl    — Parses FSP inspection CSV (sep=';'), deduplicates, upserts to PostgreSQL
+#   eagle_etl  — Parses Eagle Vision SL2/LRA1 logs, deduplicates, upserts to PostgreSQL
+#   backup_etl — Quarterly cold archival: PostgreSQL partitions → Parquet (Snappy)
+#
+#  Data flow: Machine → Airflow DAG → Rust binary → PostgreSQL (bronze layer)
+#             PostgreSQL → backup_etl → Parquet (cold storage / DT historical model)
+# =============================================================================
+
+[[bin]]
+name = "mirror2_etl"
+path = "src/bin/mirror2_etl.rs"
+
+[[bin]]
+name = "cut2_etl"
+path = "src/bin/cut2_etl.rs"
+
+[[bin]]
+name = "eagle_etl"
+path = "src/bin/eagle_etl.rs"
+
+[[bin]]
+name = "backup_etl"
+path = "src/bin/backup_etl.rs"
+
+# =============================================================================
+#  Release Profile
+#
+#  Maximizes throughput for production ETL workloads:
+#   opt-level=3     — full compiler optimizations
+#   lto=true        — link-time optimization (cross-crate inlining)
+#   codegen-units=1 — single codegen unit for maximum LTO effectiveness
+#
+#  Trade-off: slower compile time, smaller and faster binaries.
+#  Acceptable because binaries are built once in CI/Docker and deployed.
+# =============================================================================
+[profile.release]
+opt-level     = 3
+lto           = true
+codegen-units = 1
+
+# =============================================================================
+#  Dependencies
+# =============================================================================
+[dependencies]
+
+# CLI argument parsing (derive macros) — all binaries
+clap = { version = "4", features = ["derive"] }
+
+# MySQL client — mirror2_etl (Mirror2 machine data source)
+mysql = "24"
+
+# PostgreSQL client — all binaries except mirror2_etl (destination)
+postgres = "0.19"
+
+# CSV/TSV parsing — cut2_etl (semicolon-delimited) and eagle_etl
+csv = "1"
+
+# Date/time handling with serde support — all binaries
+# Used for timestamp construction, partition key generation, and watermarking
+chrono = { version = "0.4", features = ["serde"] }
+
+# JSON serialization — stdout protocol between Rust binaries and Python/Airflow
+# Each binary outputs {"rows": <n>, "status": "success"} on completion
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Apache Arrow + Parquet — backup_etl only
+# Writes quarterly cold storage archives with Snappy compression.
+# These Parquet files are the historical data layer for Digital Twin simulation.
+arrow   = { version = "53", default-features = false, features = ["csv"] }
+parquet = { version = "53", default-features = false, features = ["arrow", "snap"] }
