@@ -201,8 +201,8 @@ O sistema foi projetado para operar de forma 100% autônoma depois de implantado
 **1. Clonar o repositório**
 
 ```bash
-git clone https://github.com/VictorJenckel/local_cluster_industrial_data
-cd local_cluster_industrial_data
+git clone https://github.com/VictorJenckel/Industrial_data_gateway
+cd industrial_data_gateway
 ```
 
 **2. Configurar as variáveis de ambiente**
