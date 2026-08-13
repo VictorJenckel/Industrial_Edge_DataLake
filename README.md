@@ -123,9 +123,11 @@ O processo libera espaço em disco sem bloquear as tabelas de produção.
 │                                                             │
 │  Dashboards • Relatórios • Analytics                        │
 └─────────────────────────────────────────────────────────────┘
-## A camada PostgreSQL atua como um repositório central altamente confiável.
+```
 
-Uma vez tratados e persistidos, os dados ficam prontamente disponíveis para consultas por sistemas externos, garantindo que os dashboards de produção reflitam o estado real da fábrica sem sobrecarregar a rede de automação ou as próprias máquinas.
+A camada PostgreSQL atua como um repositório central altamente confiável. Uma vez tratados e persistidos, os dados ficam prontamente disponíveis para consultas por sistemas externos, garantindo que os dashboards de produção reflitam o estado real da fábrica sem sobrecarregar a rede de automação ou as próprias máquinas.
+
+---
 
 ## Stack de Tecnologia
 
@@ -139,22 +141,31 @@ Uma vez tratados e persistidos, os dados ficam prontamente disponíveis para con
 | Transporte de Arquivos | SMBClient + rsync | Coleta de logs de máquinas modernas e legadas |
 | Backup | Crontab + SMBClient | Recuperação de desastres automatizada para pasta de rede |
 | Armazenamento Frio | Parquet + Snappy | Arquivamento trimestral e liberação de espaço em produção |
-Rede e Segurança
+
+---
+
+## Rede e Segurança
 
 O servidor opera em uma rede de controle industrial restrita (Camada P2), isolada da rede corporativa de TI.
 
 O acesso aos dados pelo servidor de dashboards é controlado através de um gateway OT/IT preexistente.
 
-O firewall (ufw) permite apenas as portas necessárias:
+O firewall (`ufw`) permite apenas as portas necessárias:
 
-8081/tcp  — Interface Web do Airflow
-5432/tcp  — PostgreSQL
-3000/tcp  — Grafana
-22/tcp    — Administração remota via SSH
+| Porta | Serviço |
+|---|---|
+| 8081/tcp | Interface Web do Airflow |
+| 5432/tcp | PostgreSQL |
+| 3000/tcp | Grafana |
+| 22/tcp | Administração remota via SSH |
 
 A arquitetura mantém o processamento e armazenamento dos dados próximos à origem, reduzindo a dependência da rede corporativa e evitando tráfego desnecessário entre OT e IT.
 
-Estrutura do Projeto
+---
+
+## Estrutura do Projeto
+
+```text
 datalake_local/
 │
 ├── dags/
@@ -179,76 +190,115 @@ datalake_local/
 │
 ├── docker-compose.yml
 └── README.md
-Como Executar
+```
+
+---
+
+## Como Executar
 
 O sistema foi projetado para operar de forma 100% autônoma depois de implantado.
 
-1. Clonar o repositório
+**1. Clonar o repositório**
+
+```bash
 git clone https://github.com/VictorJenckel/local_cluster_industrial_data
 cd local_cluster_industrial_data
-2. Configurar as variáveis de ambiente
+```
+
+**2. Configurar as variáveis de ambiente**
+
+```bash
 cp .env.example .env
+```
 
-Configure no arquivo .env:
+Configure no arquivo `.env`:
 
-Diretórios de staging.
-Credenciais do PostgreSQL.
-Endereços das máquinas SMB.
-Caminhos dos arquivos de log.
-Destinos de backup.
-Configurações de rede.
+- Diretórios de staging.
+- Credenciais do PostgreSQL.
+- Endereços das máquinas SMB.
+- Caminhos dos arquivos de log.
+- Destinos de backup.
+- Configurações de rede.
 
-3. Iniciar os serviços
+**3. Iniciar os serviços**
+
+```bash
 docker compose up -d
+```
 
-4. Compilar os binários ETL em Rust
+**4. Compilar os binários ETL em Rust**
+
+```bash
 cd rust_etl
 cargo build --release
-Interfaces de Gerenciamento
+```
+
+---
+
+## Interfaces de Gerenciamento
 
 As interfaces podem ser acessadas a partir de máquinas autorizadas na rede industrial utilizando o IP estático do servidor.
 
-Serviço	URL
-Airflow	http://<ip-do-servidor>:8081
-Grafana	http://<ip-do-servidor>:3000
+| Serviço | URL |
+|---|---|
+| Airflow | `http://<ip-do-servidor>:8081` |
+| Grafana | `http://<ip-do-servidor>:3000` |
 
-Requisitos
-Linux — Ubuntu 22.04+
-Docker
-Docker Compose Plugin
-Rust Toolchain
-SMBClient
-PostgreSQL
-Apache Airflow
-Características Técnicas
-Ingestão
-Processamento contínuo de arquivos de inspeção.
-Suporte a máquinas legadas e modernas.
-Coleta via SMB e rsync.
-Processamento incremental.
-Reprocessamento seguro.
-Integridade
-Chave determinística event_seq.
-Inserções idempotentes.
-ON CONFLICT DO NOTHING.
-Auditoria diária.
-Reconciliação entre arquivos físicos e banco de dados.
-Detecção de inconsistências.
-Escalabilidade
-PostgreSQL particionado por data.
-Separação entre ingestão e consumo.
-Arquivamento histórico em Parquet.
-Processamento próximo à origem dos dados.
-Redução do tráfego na rede OT.
-Observabilidade
-Apache Airflow para acompanhamento dos pipelines.
-Prometheus para métricas.
-Grafana para visualização.
-DAG dedicada para auditoria de integridade.
-Dados e Fluxo de Informação
+---
+
+## Requisitos
+
+- Linux — Ubuntu 22.04+
+- Docker
+- Docker Compose Plugin
+- Rust Toolchain
+- SMBClient
+- PostgreSQL
+- Apache Airflow
+
+---
+
+## Características Técnicas
+
+### Ingestão
+
+- Processamento contínuo de arquivos de inspeção.
+- Suporte a máquinas legadas e modernas.
+- Coleta via SMB e rsync.
+- Processamento incremental.
+- Reprocessamento seguro.
+
+### Integridade
+
+- Chave determinística `event_seq`.
+- Inserções idempotentes.
+- `ON CONFLICT DO NOTHING`.
+- Auditoria diária.
+- Reconciliação entre arquivos físicos e banco de dados.
+- Detecção de inconsistências.
+
+### Escalabilidade
+
+- PostgreSQL particionado por data.
+- Separação entre ingestão e consumo.
+- Arquivamento histórico em Parquet.
+- Processamento próximo à origem dos dados.
+- Redução do tráfego na rede OT.
+
+### Observabilidade
+
+- Apache Airflow para acompanhamento dos pipelines.
+- Prometheus para métricas.
+- Grafana para visualização.
+- DAG dedicada para auditoria de integridade.
+
+---
+
+## Dados e Fluxo de Informação
 
 O fluxo completo pode ser resumido da seguinte forma:
 
+```text
 Máquina de Inspeção
         │
         ▼
@@ -278,40 +328,51 @@ Servidor Externo
         ├── Dashboards
         ├── Relatórios
         └── Analytics
-Princípios de Engenharia
+```
+
+---
+
+## Princípios de Engenharia
 
 Este projeto foi desenvolvido seguindo alguns princípios fundamentais:
 
-Os dados devem ser confiáveis antes de chegar ao nível gerencial.
-A ingestão deve ser idempotente.
-Falhas de máquinas não podem causar perda silenciosa de dados.
-A auditoria deve ser automatizada.
-A infraestrutura OT deve permanecer isolada.
-O processamento deve ocorrer próximo à origem sempre que possível.
-Dados históricos devem ser removidos da camada operacional sem perda de informação.
-A arquitetura deve continuar funcionando mesmo quando os equipamentos apresentarem comportamento inesperado.
-Status do Projeto
+- Os dados devem ser confiáveis antes de chegar ao nível gerencial.
+- A ingestão deve ser idempotente.
+- Falhas de máquinas não podem causar perda silenciosa de dados.
+- A auditoria deve ser automatizada.
+- A infraestrutura OT deve permanecer isolada.
+- O processamento deve ocorrer próximo à origem sempre que possível.
+- Dados históricos devem ser removidos da camada operacional sem perda de informação.
+- A arquitetura deve continuar funcionando mesmo quando os equipamentos apresentarem comportamento inesperado.
 
-Production / Industrial Environment
+---
+
+## Status do Projeto
+
+**Production / Industrial Environment**
 
 O sistema foi desenvolvido para operação em ambiente industrial real, processando dados provenientes de linhas de inspeção óptica de vidro plano.
 
-Principais capacidades
- Ingestão automática
- Processamento incremental
- Deduplicação determinística
- Inserção idempotente
- PostgreSQL particionado
- Orquestração com Airflow
- Auditoria diária
- Monitoramento com Prometheus
- Dashboards com Grafana
- Backup automatizado
- Arquivamento histórico em Parquet
- Operação contínua em ambiente industrial
-Sobre o Autor
+**Principais capacidades**
 
-Criado e mantido por Victor Jenckel.
+- [x] Ingestão automática
+- [x] Processamento incremental
+- [x] Deduplicação determinística
+- [x] Inserção idempotente
+- [x] PostgreSQL particionado
+- [x] Orquestração com Airflow
+- [x] Auditoria diária
+- [x] Monitoramento com Prometheus
+- [x] Dashboards com Grafana
+- [x] Backup automatizado
+- [x] Arquivamento histórico em Parquet
+- [x] Operação contínua em ambiente industrial
+
+---
+
+## Sobre o Autor
+
+Criado e mantido por **Victor Jenckel**.
 
 Engenheiro de automação industrial com mais de 15 anos de experiência em chão de fábrica, especializado em automação industrial, integração OT/IT e engenharia de dados industriais.
 
