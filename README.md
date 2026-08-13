@@ -123,21 +123,22 @@ O processo libera espaço em disco sem bloquear as tabelas de produção.
 │                                                             │
 │  Dashboards • Relatórios • Analytics                        │
 └─────────────────────────────────────────────────────────────┘
-
-A camada PostgreSQL atua como um repositório central altamente confiável.
+## A camada PostgreSQL atua como um repositório central altamente confiável.
 
 Uma vez tratados e persistidos, os dados ficam prontamente disponíveis para consultas por sistemas externos, garantindo que os dashboards de produção reflitam o estado real da fábrica sem sobrecarregar a rede de automação ou as próprias máquinas.
 
-Stack de Tecnologia
-Camada	Tecnologia	Papel
-SO & Contêineres	Linux + Docker Compose	Hospedagem e isolamento dos serviços
-Banco de Dados	PostgreSQL	Armazenamento particionado e disponibilização de dados
-Orquestração	Apache Airflow	Agendamento de DAGs e gerenciamento do pipeline
-Processamento ETL	Rust + Python	Rust para ingestão e processamento; Python para lógica das DAGs
-Monitoramento	Prometheus + Grafana	Observabilidade da infraestrutura e do pipeline
-Transporte de Arquivos	SMBClient + rsync	Coleta de logs de máquinas modernas e legadas
-Backup	Crontab + SMBClient	Recuperação de desastres automatizada para pasta de rede
-Armazenamento Frio	Parquet + Snappy	Arquivamento trimestral e liberação de espaço em produção
+## Stack de Tecnologia
+
+| Camada | Tecnologia | Papel |
+|---|---|---|
+| SO & Contêineres | Linux + Docker Compose | Hospedagem e isolamento dos serviços |
+| Banco de Dados | PostgreSQL | Armazenamento particionado e disponibilização de dados |
+| Orquestração | Apache Airflow | Agendamento de DAGs e gerenciamento do pipeline |
+| Processamento ETL | Rust + Python | Rust para ingestão e processamento; Python para lógica das DAGs |
+| Monitoramento | Prometheus + Grafana | Observabilidade da infraestrutura e do pipeline |
+| Transporte de Arquivos | SMBClient + rsync | Coleta de logs de máquinas modernas e legadas |
+| Backup | Crontab + SMBClient | Recuperação de desastres automatizada para pasta de rede |
+| Armazenamento Frio | Parquet + Snappy | Arquivamento trimestral e liberação de espaço em produção |
 Rede e Segurança
 
 O servidor opera em uma rede de controle industrial restrita (Camada P2), isolada da rede corporativa de TI.
